@@ -1,0 +1,27 @@
+mode: system # det, rec or system
+image_dir: ../../doc/imgs/12.jpg
+
+models:
+  det:
+    model_dir: ../../inference/ch_PP-OCRv2_det_infer
+    cpu_math_library_num_threads: 4
+    use_mkldnn: true
+    max_side_len: 960
+    det_db_thresh: 0.3
+    det_db_box_thresh: 0.5
+    det_db_unclip_ratio: 1.6
+    use_polygon_score: false
+    visualize: true
+    precision: fp32
+  cls:
+    model_dir: ../../inference/ch_ppocr_mobile_v2.0_cls_infer
+    cpu_math_library_num_threads: 4
+    use_mkldnn: true
+    cls_thresh: 0.9
+    precision: fp32
+  rec:
+    cpu_math_library_num_threads: 4
+    use_mkldnn: true
+    model_dir: ../../inference/ch_PP-OCRv2_rec_infer
+    label_path: ../../ppocr/utils/ppocr_keys_v1.txt
+    precision: fp32
