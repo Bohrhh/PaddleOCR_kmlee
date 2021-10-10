@@ -227,7 +227,10 @@ class TextDetector(object):
 
         #self.predictor.try_shrink_memory()
         post_result = self.postprocess_op(preds, shape_list)
-        # return post_result
+
+        a = post_result[0]['points'][2]
+        b = self.postprocess_op.regular_polygon(a)
+        return a, b
 
         dt_boxes = post_result[0]['points']
         if self.det_algorithm == "SAST" and self.det_sast_polygon:
@@ -247,12 +250,12 @@ def main():
     args = utility.parse_args()
     args.det_algorithm = "DB"
     args.det_model_dir="inference/ch_PP-OCRv2_det_infer"
-    args.image_dir="./doc/imgs_en/254.jpg"
+    args.image_dir="./doc/imgs_en/img623.jpg"
     args.warmup = False
     args.det_db_box_thresh = 0.2
     args.det_db_polygon = True
-    # args.use_dilation = True
-    args.det_db_unclip_ratio = 1.8
+    args.use_dilation = True
+    args.det_db_unclip_ratio = 2.0
 
     image_file_list = get_image_file_list(args.image_dir)
     text_detector = TextDetector(args)
@@ -277,7 +280,7 @@ def main():
             continue
         st = time.time()
 
-        # return text_detector(img)
+        return text_detector(img)
         dt_boxes, _ = text_detector(img)
 
         elapse = time.time() - st

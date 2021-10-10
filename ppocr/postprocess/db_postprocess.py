@@ -51,7 +51,6 @@ class DBPostProcess(object):
         self.dilation_kernel = None if not use_dilation else np.array(
             [[1, 1], [1, 1]])
 
-
     def polygons_from_bitmap(self, pred, _bitmap, dest_width, dest_height):
         '''
         _bitmap: single map with shape (H, W),
@@ -67,7 +66,7 @@ class DBPostProcess(object):
         contours, _ = cv2.findContours((bitmap * 255).astype(np.uint8), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
         for contour in contours[:self.max_candidates]:
-            epsilon = 0.001 * cv2.arcLength(contour, True)
+            epsilon = 0.005 * cv2.arcLength(contour, True)
             approx = cv2.approxPolyDP(contour, epsilon, True)
             points = approx.reshape((-1, 2))
             if points.shape[0] < 4:
@@ -75,7 +74,7 @@ class DBPostProcess(object):
             # _, sside = self.get_mini_boxes(contour)
             # if sside < self.min_size:
             #     continue
-            score = self.box_score_fast(pred, contour.squeeze(1))
+            score = self.box_score_fast(pred, points.reshape(-1, 2))
             if self.box_thresh > score:
                 continue
 
@@ -96,6 +95,75 @@ class DBPostProcess(object):
             scores.append(score)
         return boxes, scores
 
+    def regular_polygon(self, contour):
+        """
+        Args:
+            contour: (n, 2)
+        
+        Return:
+            regular polygon: (n, 2)
+        """
+        
+        bbox = cv2.minAreaRect(contour) # (center (x,y), (width, height), angle of rotation)
+        area_contour = cv2.contourArea(contour)
+        area_bbox = bbox[1][0] * bbox[1][1]
+        if area_contour/area_bbox > 0.9:
+            return cv2.boxPoints(bbox)
+        else:
+            p1,p2,p3,p4 = cv2.boxPoints(bbox)
+            if ((p1-p2)**2).sum()>((p2-p3)**2).sum():
+                p1 = (p1 + p2)/2
+                p2 = (p3 + p4)/2
+            else:
+                p1 = (p1 + p4)/2
+                p2 = (p2 + p3)/2
+            x1,y1 = p1; x2,y2 = p2
+            a = y2-y1
+            b = x1-x2
+            c = x2*y1-x1*y2
+            contour1, contour2 = self.split_polygon_by_line(contour, a, b, c)
+            return contour1, contour2
+        
+    def split_polygon_by_line(self, contour, a, b, c):
+        """
+        line: ax+by+c=0
+        """
+        contour1 = []
+        contour2 = []
+        def get_vertical_point(x0,y0,a,b,c):
+            x1 = (b**2*x0-a*b*y0-a*c)/(a**2+b**2)
+            y1 = (a**2*y0-a*b*x0-b*c)/(a**2+b**2)
+            return x1, y1
+        def get_near_point(p1,p2,a,b,c):
+            d1 = abs(a*p1[0]+b*p1[1]+c)/np.sqrt(a**2+b**2)
+            d2 = abs(a*p2[0]+b*p2[1]+c)/np.sqrt(a**2+b**2)
+            if d1>d2:
+                return p2
+            else:
+                return p1
+        last_point_side = 1 if a * contour[0][0] + b * contour[0][1] + c > 0 else -1
+        for i, point in enumerate(contour):
+            if a * point[0] + b * point[1] + c > 0:
+                if last_point_side == 1:
+                    contour1.append(point)
+                else:
+                    near_point = get_near_point(contour[i-1], point, a, b, c)
+                    vertical_point = get_vertical_point(near_point[0], near_point[1], a, b, c)
+                    contour1.append(vertical_point)
+                    contour2.append(vertical_point)
+                    contour1.append(point)
+                last_point_side = 1
+            else:
+                if last_point_side == -1:
+                    contour2.append(point)
+                else:
+                    near_point = get_near_point(contour[i-1], point, a, b, c)
+                    vertical_point = get_vertical_point(near_point[0], near_point[1], a, b, c)
+                    contour1.append(vertical_point)
+                    contour2.append(vertical_point)
+                    contour2.append(point)
+                last_point_side = -1
+        return contour1, contour2
 
     def boxes_from_bitmap(self, pred, _bitmap, dest_width, dest_height):
         '''
@@ -149,7 +217,7 @@ class DBPostProcess(object):
         poly = Polygon(box)
         distance = poly.area * unclip_ratio / poly.length
         offset = pyclipper.PyclipperOffset()
-        offset.AddPath(box, pyclipper.JT_SQUARE, pyclipper.ET_CLOSEDPOLYGON)
+        offset.AddPath(box, pyclipper.JT_ROUND, pyclipper.ET_CLOSEDPOLYGON)
         expanded = np.array(offset.Execute(distance))
         return expanded
 
