@@ -95,7 +95,27 @@ class DBPostProcess(object):
             scores.append(score)
         return boxes, scores
 
-    def regular_polygon(self, contour):
+    def bboxCutLine(self, bbox):
+        """
+        Args:
+            bbox: (center (x,y), (width, height), angle of rotation)
+        Return:
+            line: (a,b,c), line represent ax+by+c=0
+        """
+        p1,p2,p3,p4 = cv2.boxPoints(bbox)
+        if ((p1-p2)**2).sum()>((p2-p3)**2).sum():
+            p1 = (p1 + p2)/2
+            p2 = (p3 + p4)/2
+        else:
+            p1 = (p1 + p4)/2
+            p2 = (p2 + p3)/2
+        x1,y1 = p1; x2,y2 = p2
+        a = y2-y1
+        b = x1-x2
+        c = x2*y1-x1*y2
+        return a,b,c
+
+    def polygon2boxes(self, contour, recursions=0, maxRecursions=3):
         """
         Args:
             contour: (n, 2)
@@ -103,26 +123,34 @@ class DBPostProcess(object):
         Return:
             regular polygon: (n, 2)
         """
-        
+        contour = np.array(contour).astype(np.int64)
         bbox = cv2.minAreaRect(contour) # (center (x,y), (width, height), angle of rotation)
         area_contour = cv2.contourArea(contour)
         area_bbox = bbox[1][0] * bbox[1][1]
-        if area_contour/area_bbox > 0.9:
-            return cv2.boxPoints(bbox)
+        print(f"current recursions:{recursions}")
+        if area_contour/area_bbox > 0.9 or recursions>=maxRecursions:
+            return [cv2.boxPoints(bbox)]
+        elif area_contour/area_bbox > 0.7 and bbox[1][0]/bbox[1][1] < 1.1 and bbox[1][0]/bbox[1][1] > 0.9:
+            return [cv2.boxPoints(bbox)]
         else:
-            p1,p2,p3,p4 = cv2.boxPoints(bbox)
-            if ((p1-p2)**2).sum()>((p2-p3)**2).sum():
-                p1 = (p1 + p2)/2
-                p2 = (p3 + p4)/2
-            else:
-                p1 = (p1 + p4)/2
-                p2 = (p2 + p3)/2
-            x1,y1 = p1; x2,y2 = p2
-            a = y2-y1
-            b = x1-x2
-            c = x2*y1-x1*y2
+            a,b,c = self.bboxCutLine(bbox)
             contour1, contour2 = self.split_polygon_by_line(contour, a, b, c)
-            return contour1, contour2
+            return self.polygon2boxes(contour1, recursions+1, maxRecursions)+self.polygon2boxes(contour2, recursions+1, maxRecursions)
+
+    def regular_polygon(self, contour, maxRecursions):
+        boxes = self.polygon2boxes(contour, maxRecursions=maxRecursions)
+        length = len(boxes)
+        if length==1:
+            return boxes[0]
+        pointSide1 = [boxes[0][1]]
+        pointSide2 = [boxes[0][2]]
+        for i in range(length-1):
+            pointSide1.append((boxes[i][0]+boxes[i+1][1])/2)
+            pointSide2.append((boxes[i][3]+boxes[i+1][2])/2)
+        pointSide1 += [boxes[-1][0]]
+        pointSide2 += [boxes[-1][3]]
+        polygon = np.array(pointSide1 + pointSide2[::-1])
+        return polygon
         
     def split_polygon_by_line(self, contour, a, b, c):
         """
@@ -142,6 +170,7 @@ class DBPostProcess(object):
             else:
                 return p1
         last_point_side = 1 if a * contour[0][0] + b * contour[0][1] + c > 0 else -1
+        cross_num = 0
         for i, point in enumerate(contour):
             if a * point[0] + b * point[1] + c > 0:
                 if last_point_side == 1:
@@ -152,6 +181,7 @@ class DBPostProcess(object):
                     contour1.append(vertical_point)
                     contour2.append(vertical_point)
                     contour1.append(point)
+                    cross_num += 1
                 last_point_side = 1
             else:
                 if last_point_side == -1:
@@ -162,7 +192,9 @@ class DBPostProcess(object):
                     contour1.append(vertical_point)
                     contour2.append(vertical_point)
                     contour2.append(point)
+                    cross_num += 1
                 last_point_side = -1
+        assert cross_num==2, f"current cross num is {cross_num}, should be 2"
         return contour1, contour2
 
     def boxes_from_bitmap(self, pred, _bitmap, dest_width, dest_height):

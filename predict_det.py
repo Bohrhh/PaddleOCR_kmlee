@@ -229,7 +229,7 @@ class TextDetector(object):
         post_result = self.postprocess_op(preds, shape_list)
 
         a = post_result[0]['points'][2]
-        b = self.postprocess_op.regular_polygon(a)
+        b = self.postprocess_op.regular_polygon(a, 3)
         return a, b
 
         dt_boxes = post_result[0]['points']
